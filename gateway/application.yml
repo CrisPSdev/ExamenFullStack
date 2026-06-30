@@ -30,6 +30,12 @@ spring:
             - Path=/api/v1/traveler/**
           filters:
             - RewritePath=/api/v1/(?<segment>.*), /api/v1/${segment}
+        - id: resenas-service
+          uri: lb://resenas
+          predicates:
+            - Path=/api/v1/resenas/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /api/v1/${segment}
 eureka:
   client:
     service-url:
