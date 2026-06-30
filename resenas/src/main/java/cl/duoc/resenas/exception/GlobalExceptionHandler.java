@@ -45,39 +45,33 @@ public class GlobalExceptionHandler {
                 .body(new ApiResponse<>(405, "Método HTTP no permitido para esta ruta", null));
     }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<ApiResponse<Object>> handleResourceNotFound(ResourceNotFoundException ex) {
-        logger.warn("Recurso no encontrado: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(new ApiResponse<>(404, ex.getMessage(), null));
-    }
-
-    @ExceptionHandler(UnauthorizedException.class)
-    public ResponseEntity<ApiResponse<Object>> handleUnauthorized(UnauthorizedException ex) {
-        logger.warn("Acceso no autorizado: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(new ApiResponse<>(401, ex.getMessage(), null));
-    }
-
-    @ExceptionHandler(DuplicateResourceException.class)
-    public ResponseEntity<ApiResponse<Object>> handleDuplicateResource(DuplicateResourceException ex) {
-        logger.warn("Recurso duplicado: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(new ApiResponse<>(409, ex.getMessage(), null));
-    }
-
-    @ExceptionHandler(BusinessRuleException.class)
-    public ResponseEntity<ApiResponse<Object>> handleBusinessRule(BusinessRuleException ex) {
-        logger.warn("Regla de negocio violada: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(new ApiResponse<>(400, ex.getMessage(), null));
-    }
-
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Object>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
         logger.error("Violación de integridad de datos: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(new ApiResponse<>(409, "Conflicto con los datos enviados. Puede que el registro ya exista", null));
+    }
+
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<ApiResponse<Object>> handleRuntimeException(RuntimeException ex) {
+        String message = ex.getMessage();
+        HttpStatus status = HttpStatus.BAD_REQUEST;
+        int code = 400;
+
+        if (message != null && message.toLowerCase().contains("no encontrad")) {
+            status = HttpStatus.NOT_FOUND;
+            code = 404;
+            logger.warn("Recurso no encontrado: {}", message);
+        } else if (message != null && message.toLowerCase().contains("ya existe")) {
+            status = HttpStatus.CONFLICT;
+            code = 409;
+            logger.warn("Recurso duplicado: {}", message);
+        } else {
+            logger.warn("Regla de negocio violada: {}", message);
+        }
+
+        return ResponseEntity.status(status)
+                .body(new ApiResponse<>(code, message, null));
     }
 
     @ExceptionHandler(Exception.class)
