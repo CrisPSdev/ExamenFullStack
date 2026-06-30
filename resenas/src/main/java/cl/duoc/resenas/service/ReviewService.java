@@ -1,10 +1,6 @@
 package cl.duoc.resenas.service;
 
 import cl.duoc.resenas.dto.*;
-import cl.duoc.resenas.exception.BusinessRuleException;
-import cl.duoc.resenas.exception.DuplicateResourceException;
-import cl.duoc.resenas.exception.ResourceNotFoundException;
-import cl.duoc.resenas.exception.UnauthorizedException;
 import cl.duoc.resenas.model.Review;
 import cl.duoc.resenas.model.ReviewRating;
 import cl.duoc.resenas.repository.ReviewRepository;
@@ -35,11 +31,11 @@ public class ReviewService {
 
         ApiResponse<Boolean> destResponse = destinationService.validateDestination(dto.getDestinationId(), token);
         if (destResponse == null || destResponse.getCode() != 200 || destResponse.getData() == null || !destResponse.getData()) {
-            throw new BusinessRuleException("Destino inválido o inexistente");
+            throw new RuntimeException("Destino inválido o inexistente");
         }
 
         if (reviewRepository.existsByUserIdAndDestinationId(userId, dto.getDestinationId())) {
-            throw new DuplicateResourceException("Ya existe una reseña del usuario para este destino");
+            throw new RuntimeException("Ya existe una reseña del usuario para este destino");
         }
 
         Review review = new Review();
@@ -58,7 +54,7 @@ public class ReviewService {
     @Transactional(readOnly = true)
     public ReviewResponseDTO getReviewById(UUID id) {
         Review review = reviewRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Reseña no encontrada con id: " + id));
+                .orElseThrow(() -> new RuntimeException("Reseña no encontrada con id: " + id));
         return toResponseDTO(review);
     }
 
@@ -66,7 +62,7 @@ public class ReviewService {
     public List<ReviewResponseDTO> getReviewsByDestination(UUID destinationId, String token) {
         ApiResponse<Boolean> destResponse = destinationService.validateDestination(destinationId, token);
         if (destResponse == null || destResponse.getCode() != 200 || destResponse.getData() == null || !destResponse.getData()) {
-            throw new BusinessRuleException("Destino inválido o inexistente");
+            throw new RuntimeException("Destino inválido o inexistente");
         }
         return reviewRepository.findByDestinationId(destinationId).stream()
                 .map(this::toResponseDTO)
@@ -86,16 +82,16 @@ public class ReviewService {
         UUID userId = requireValidUser(token);
 
         Review review = reviewRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Reseña no encontrada con id: " + id));
+                .orElseThrow(() -> new RuntimeException("Reseña no encontrada con id: " + id));
 
         if (!review.getUserId().equals(userId)) {
-            throw new UnauthorizedException("No tiene permiso para modificar esta reseña");
+            throw new RuntimeException("No tiene permiso para modificar esta reseña");
         }
 
         if (dto.getDestinationId() != null && !dto.getDestinationId().equals(review.getDestinationId())) {
             ApiResponse<Boolean> destResponse = destinationService.validateDestination(dto.getDestinationId(), token);
             if (destResponse == null || destResponse.getCode() != 200 || destResponse.getData() == null || !destResponse.getData()) {
-                throw new BusinessRuleException("Destino inválido o inexistente");
+                throw new RuntimeException("Destino inválido o inexistente");
             }
             review.setDestinationId(dto.getDestinationId());
         }
@@ -117,10 +113,10 @@ public class ReviewService {
         UUID userId = requireValidUser(token);
 
         Review review = reviewRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Reseña no encontrada con id: " + id));
+                .orElseThrow(() -> new RuntimeException("Reseña no encontrada con id: " + id));
 
         if (!review.getUserId().equals(userId)) {
-            throw new UnauthorizedException("No tiene permiso para eliminar esta reseña");
+            throw new RuntimeException("No tiene permiso para eliminar esta reseña");
         }
 
         reviewRepository.delete(review);
@@ -130,7 +126,7 @@ public class ReviewService {
     private UUID requireValidUser(String token) {
         ApiResponse<UserDTO> authResponse = authService.validateToken(token);
         if (authResponse == null || authResponse.getCode() != 200 || authResponse.getData() == null) {
-            throw new UnauthorizedException("Token inválido");
+            throw new RuntimeException("Token inválido");
         }
         return authResponse.getData().getId();
     }
