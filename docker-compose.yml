@@ -51,8 +51,26 @@ services:
           resources:
             limits:
               memory: 512M
+  mysql_resenas:
+    image: mysql:8.0
+    container_name: mysql_resenas
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: resenas
+      MYSQL_USER: examen
+      MYSQL_PASSWORD: examen123
+    ports:
+      - "3313:3306"
+    volumes:
+      - mysql_resenas_data:/var/lib/mysql
+    deploy:
+          resources:
+            limits:
+              memory: 512M
 volumes:
   mysql_login_data:
   mysql_destination_data:
   mysql_traveler_data:
+  mysql_resenas_data:
   
