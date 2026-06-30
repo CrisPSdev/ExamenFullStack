@@ -108,7 +108,7 @@ Cada servicio tiene su propia base de datos MySQL, orquestada con **Docker Compo
   - Spring WebClient (para consumir otros servicios)
   - Eureka Client
   - Swagger (OpenAPI)
-- **Base de datos:** MySQL (`mysql_traveler`)
+  - **Base de datos:** MySQL (`mysql_traveler`)
   - Host: `localhost`
   - Puerto: `3312`
   - DB: `traveler`
@@ -117,11 +117,33 @@ Cada servicio tiene su propia base de datos MySQL, orquestada con **Docker Compo
 
 ---
 
+### 6. Resenas Service
+- **ArtifactId:** `resenas`
+- **Puerto:** `9003`
+- **Tecnologías:**
+  - Spring Boot 4.0.7
+  - Spring Data JPA
+  - Flyway
+  - Spring WebFlux (WebClient para consumir Login y Destination)
+  - Spring Security + JWT (validación de token)
+  - Eureka Client
+  - Swagger (OpenAPI)
+- **Base de datos:** MySQL (`mysql_resenas`)
+  - Host: `localhost`
+  - Puerto: `3313`
+  - DB: `resenas`
+  - Usuario: `examen`
+  - Password: `examen123`
+- **Responsabilidad:** Registrar reseñas y notas de los lugares/destinos visitados. Cada reseña se asocia a un destino (Destination Service) y al usuario autenticado (Login Service).
+
+---
+
 ## Bases de Datos (Docker Compose)
 
 - **mysql_login** → puerto `3310`, DB `login`
 - **mysql_destination** → puerto `3311`, DB `destination`
 - **mysql_traveler** → puerto `3312`, DB `traveler`
+- **mysql_resenas** → puerto `3313`, DB `resenas`
 
 Cada servicio tiene su propia base de datos aislada, con usuario `examen` y contraseña `examen123`.
 
@@ -134,16 +156,93 @@ Cada servicio tiene su propia base de datos aislada, con usuario `examen` y cont
 3. **Login Service** gestiona autenticación y generación de tokens JWT.  
 4. **Destination Service** administra destinos y validaciones.  
 5. **Traveler Service** consume Login y Destination para crear y listar viajes.  
+6. **Resenas Service** consume Login (valida token/autor) y Destination (valida destino) para registrar y consultar reseñas.
 
 ---
 
 ## Estado Actual
-- 5 microservicios activos (Eureka, Gateway, Login, Destination, Traveler).  
-- 3 bases de datos MySQL independientes.  
+- 6 microservicios activos (Eureka, Gateway, Login, Destination, Traveler, Resenas).  
+- 4 bases de datos MySQL independientes.  
 - Seguridad basada en **JWT**.  
 - Documentación de APIs con **Swagger/OpenAPI**.  
 
 
+
+---
+
+## Microservicio de Reseñas (Opción 2) — Documentación técnica
+
+A continuación se documenta el microservicio de Reseñas (`resenas`), opción elegida para el examen, cumpliendo los Indicadores de Evaluación que deben explicarse en este README.
+
+### IE 2.1.3 — Modelado de entidades, relaciones y estructura del microservicio
+
+El microservicio modela el dominio de reseñas de destinos turísticos con **dos tablas** normalizadas y una relación **OneToMany**:
+
+- **`reviews`**: representa la reseña principal. Sus atributos son `id` (UUID, PK), `user_id` (UUID, referencia lógica al usuario del Login Service), `destination_id` (UUID, referencia lógica al destino del Destination Service), `rating` (nota general 1–5), `title`, `comment`, `created_at` y `updated_at`. Se incluye una restricción `UNIQUE (user_id, destination_id)` que garantiza que un usuario solo pueda reseñar un destino una vez, reforzando la integridad del dominio.
+- **`review_ratings`**: desglose de la reseña por categoría (servicio, ubicación, precio, etc.). Sus atributos son `id` (UUID, PK), `review_id` (FK → `reviews(id)`, con `ON DELETE CASCADE`), `category` y `score` (1–5).
+
+**Relación:** `reviews` 1 ─── N `review_ratings` (OneToMany), modelada con JPA mediante `@OneToMany(mappedBy = "review", cascade = ALL, orphanRemoval = true)` en `Review` y `@ManyToOne` + `@JoinColumn` en `ReviewRating`. Esto aplica normalización (la tabla de categorías depende de la reseña y se elimina en cascada) y desacoplamiento: las referencias a `user_id` y `destination_id` se almacenan como UUID sin FK física, dado que pertenecen a otras bases de datos (arquitectura de microservicios con DB por servicio).
+
+**Estructura CSR (paquetes por capa):**
+
+```
+cl.duoc.resenas/
+├── ResenasApplication.java
+├── config/      SecurityConfig, TokenValidationFilter, WebClientConfig, OpenApiConfig
+├── controller/  ReviewController        (capa REST, endpoints /api/v1/resenas/reviews)
+├── service/     ReviewService, AuthService, DestinationService   (lógica de negocio + clientes remotos)
+├── repository/  ReviewRepository, ReviewRatingRepository         (Spring Data JPA)
+├── model/       Review, ReviewRating                              (entidades JPA)
+├── dto/         ApiResponse, UserDTO, ReviewRequestDTO, ReviewResponseDTO, RatingItemDTO
+├── exception/   GlobalExceptionHandler, ResourceNotFoundException,
+│                UnauthorizedException, DuplicateResourceException, BusinessRuleException
+└── resources/   application.yml, db/migration/V1__create_reviews_tables.sql
+```
+
+La separación es real: el controlador solo orquesta, el servicio contiene las reglas de negocio y validaciones remotas, el repositorio encapsula la persistencia, y los DTOs aíslan el modelo de la API. Los IDs se generan con `@PrePersist` (UUID aleatorio), y las migraciones se inicializan con **Flyway** (`V1__create_reviews_tables.sql`), con `ddl-auto: none` para que el esquema lo administre Flyway.
+
+### IE 2.4.2 — Flujo de comunicación entre microservicios
+
+El microservicio de Reseñas se comunica con dos servicios remotos mediante **WebClient reactivo** + **Eureka** (descubrimiento de servicios), usando un `WebClient.Builder` anotado con `@LoadBalanced`, lo que permite invocar por nombre lógico (`http://login`, `http://destination`) en vez de host:puerto fijos.
+
+**Flujo al crear una reseña (`POST /api/v1/resenas/reviews`):**
+
+1. El **API Gateway** (puerto 9999) recibe la petición con `Authorization: Bearer <token>` y la enruta a `resenas` por la ruta `Path=/api/v1/resenas/**` → `lb://resenas`.
+2. El **`TokenValidationFilter`** (Spring Security) intercepta la petición y llama a `AuthService.validateToken(token)`, que hace un `GET http://login/api/v1/users/validate?token=...` contra el **Login Service**. Si el token es válido, el `UserDTO` queda en el `SecurityContext`.
+3. El controlador delega en `ReviewService.createReview(token, dto)`, que:
+   - vuelve a validar el token vía `AuthService` para obtener el `userId` (autor de la reseña);
+   - llama a `DestinationService.validateDestination(destinationId, token)` → `GET http://destination/api/v1/destination/destinations/exists?id=...` contra el **Destination Service**, reenviando el token JWT en la cabecera `Authorization`;
+   - si el destino no existe → `BusinessRuleException` (400); si el usuario ya reseñó ese destino → `DuplicateResourceException` (409);
+   - persiste la reseña con `userId` (obtenido remotamente, no del body) y `destinationId`, junto con el desglose de categorías.
+4. La respuesta se envuelve en `ApiResponse<T>` (code/message/data) y retorna al cliente.
+
+**Justificación del manejo remoto:** los errores remotos se capturan con `try/catch` en `AuthService`/`DestinationService` y se devuelven como `ApiResponse(500, ...)`, evitando que una caída de un servicio dependiente rompa el flujo sin trazabilidad. El uso del token del usuario para validar el destino garantiza que la comunicación entre servicios esté autenticada de extremo a extremo. Este flujo demuestra la **correcta obtención y uso de información remota** (usuario desde Login, existencia del destino desde Destination) y su impacto en el negocio: una reseña siempre pertenece a un usuario autenticado y a un destino válido.
+
+### IE 3.1.2 — Pruebas unitarias
+
+Las pruebas se implementan con **JUnit 5 + Mockito + AssertJ + Spring MockMvc** (sin levantar contexto de Spring, estilo `standaloneSetup`), lo que las hace rápidas y enfocadas en la lógica.
+
+- **`ReviewServiceTest`** (8 tests): mockea `ReviewRepository`, `AuthService` y `DestinationService` e inyecta por constructor al `ReviewService`. Cubre: creación exitosa (verifica `save`), token inválido → `UnauthorizedException`, destino inválido → `BusinessRuleException`, reseña duplicada → `DuplicateResourceException`, reseña no encontrada → `ResourceNotFoundException`, listado por usuario, e intento de actualizar/eliminar una reseña siendo otro usuario → `UnauthorizedException`. Usa `assertThatThrownBy` para verificar excepciones y `Mockito.verify(..., never())` para asegurar que no se persiste en casos de error.
+- **`ReviewControllerStandaloneTest`** (6 tests): monta `MockMvc` con `setControllerAdvice(new GlobalExceptionHandler())` y valida códigos HTTP y el JSON de `ApiResponse` mediante `jsonPath`. Cubre: crear 200, crear con `rating=6` → 400 (validación de Bean Validation), obtener por ID 200, obtener por ID 404 (vía `ResourceNotFoundException` + handler), listar por usuario 200, y eliminar 200.
+
+`mvn test` ejecuta **15 pruebas exitosas** (6 controlador + 8 servicio + 1 aplicación). Estas pruebas validan las reglas de negocio centrales (autoría, unicidad de reseña por usuario+destino, validaciones remotas) y el comportamiento del manejo global de excepciones.
+
+### IE 3.2.2 — Documentación técnica con Swagger/OpenAPI
+
+Cada endpoint está documentado con `@Tag` y `@Operation` (resumen + descripción) y los DTOs exponen sus validaciones vía anotaciones, las que Springdoc refleja en el esquema OpenAPI. Además, `OpenApiConfig` define un bean `OpenAPI` con título, descripción, versión, contacto y licencia.
+
+La documentación se publica en:
+
+```
+http://localhost:9003/swagger-ui/index.html      (acceso directo al servicio)
+http://localhost:9003/v3/api-docs                (esquema OpenAPI en JSON)
+```
+
+La descripción de cada operación documenta el contrato real: por ejemplo, `POST /api/v1/resenas/reviews` indica que valida el token (Login Service) y la existencia del destino (Destination Service); `PUT` y `DELETE` documentan que solo el autor puede modificar/eliminar. Hay consistencia entre la documentación y el código: los códigos HTTP (200/400/401/404/409/500) y la estructura `ApiResponse` documentados coinciden con los producidos por el `GlobalExceptionHandler` y el controlador. Ejemplos de request/response están disponibles en la colección Postman del proyecto.
+
+### IE 2.5.2 — Aporte personal
+
+Autor: **Cristóbal Pardo**. El microservicio de Reseñas fue desarrollado en su totalidad para este examen, apoyándose en la arquitectura y patrones del proyecto semestral **MediReservas** (estructura CSR, `GlobalExceptionHandler` y estilo de pruebas unitarias) y replicando el patrón de comunicación remota del microservicio `traveler` del propio examen (`AuthService` + `DestinationService` con `WebClient` load-balanced + `TokenValidationFilter`). Los commits se realizan de forma progresiva: (1) esqueleto Maven + configuración YAML + entidades/repositorio/migración, (2) DTOs + configuración de seguridad/WebClient + clientes remotos, (3) servicio + controlador + manejo de excepciones, (4) infraestructura Docker Compose + ruta del Gateway, (5) pruebas unitarias, (6) colección Postman + este README.
 
 ###### Checklist de Implementación para el examen ######
 
