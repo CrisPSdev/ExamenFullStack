@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -88,5 +90,33 @@ public class TripService {
                 .collect(Collectors.toList());
 
         return new ApiResponse<>(200, "Listado de viajes", trips);
+    }
+
+    // Obtener un viaje por ID
+    public ApiResponse<TripResponseDTO> getTripById(String token, UUID id) {
+        // Validar token contra Login Service
+        ApiResponse<UserDTO> authResponse = authService.validateToken(token);
+        if (authResponse.getCode() != 200 || authResponse.getData() == null) {
+            return new ApiResponse<>(401, "Token invalido", null);
+        }
+
+        Optional<Trip> optionalTrip = tripRepository.findById(id);
+        if (optionalTrip.isEmpty()) {
+            return new ApiResponse<>(404, "Viaje no encontrado", null);
+        }
+
+        Trip trip = optionalTrip.get();
+        TripResponseDTO responseDTO = new TripResponseDTO(
+                trip.getId(),
+                trip.getUserId(),
+                trip.getDestinationId(),
+                trip.getStartDate(),
+                trip.getEndDate(),
+                trip.getTravelType(),
+                trip.getCompanions(),
+                trip.getNotes()
+        );
+
+        return new ApiResponse<>(200, "Viaje encontrado", responseDTO);
     }
 }

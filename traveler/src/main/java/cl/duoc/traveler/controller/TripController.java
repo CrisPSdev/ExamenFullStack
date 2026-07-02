@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @Tag(name = "Trip Controller", description = "Endpoints para gestión de viajes")
 @RestController
@@ -38,6 +39,17 @@ public class TripController {
 
         String token = authHeader.replace("Bearer ", "");
         ApiResponse<List<TripResponseDTO>> response = tripService.getTripsByUser(token);
+        return ResponseEntity.status(response.getCode()).body(response);
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Obtener viaje por ID", description = "Obtiene un viaje por su identificador validando token")
+    public ResponseEntity<ApiResponse<TripResponseDTO>> getTripById(
+            @RequestHeader("Authorization") String authHeader,
+            @PathVariable UUID id) {
+
+        String token = authHeader.replace("Bearer ", "");
+        ApiResponse<TripResponseDTO> response = tripService.getTripById(token, id);
         return ResponseEntity.status(response.getCode()).body(response);
     }
 }
